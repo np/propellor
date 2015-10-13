@@ -17,6 +17,7 @@ module Propellor.Property.Docker (
 	garbageCollected,
 	tweaked,
 	Image(..),
+	ImageID(..),
 	latestImage,
 	ContainerName,
 	Container(..),
@@ -43,6 +44,8 @@ module Propellor.Property.Docker (
 	-- * Internal use
 	init,
 	chain,
+	listImages,
+	listContainers,
 ) where
 
 import Propellor.Base hiding (init)
