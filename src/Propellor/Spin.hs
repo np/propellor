@@ -203,7 +203,7 @@ updateServer target relay hst connect haveprecompiled =
 				sendPrecompiled hn
 				updateServer hn relay hst haveprecompiled (error "loop")
 			(Just NeedGitPush) -> do
-				sendGitUpdate hn fromh toh
+				-- sendGitUpdate hn fromh toh
 				hClose fromh
 				hClose toh
 				done
