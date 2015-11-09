@@ -1,6 +1,7 @@
 module Propellor.Spin (
 	commitSpin,
 	spin,
+	spin',
 	update,
 	gitPushHelper,
 	mergeSpin,
@@ -32,7 +33,8 @@ import Utility.SafeCommand
 commitSpin :: IO ()
 commitSpin = do
 	void $ actionMessage "Git commit" $
-		gitCommit [Param "--allow-empty", Param "-a", Param "-m", Param spinCommitMessage]
+		gitCommit (Just spinCommitMessage) 
+			[Param "--allow-empty", Param "-a"]
 	-- Push to central origin repo first, if possible.
 	-- The remote propellor will pull from there, which avoids
 	-- us needing to send stuff directly to the remote host.
@@ -40,8 +42,11 @@ commitSpin = do
 		void $ actionMessage "Push to central git repository" $
 			boolSystem "git" [Param "push"]
 
-spin :: HostName -> Maybe HostName -> Host -> IO ()
-spin target relay hst = do
+spin :: Maybe HostName -> HostName -> Host -> IO ()
+spin = spin' Nothing
+
+spin' :: Maybe PrivMap -> Maybe HostName -> HostName -> Host -> IO ()
+spin' mprivdata relay target hst = do
 	cacheparams <- if viarelay
 		then pure ["-A"]
 		else toCommand <$> sshCachingParams hn
@@ -56,6 +61,7 @@ spin target relay hst = do
 	updateServer target relay hst
 		(proc "ssh" $ cacheparams ++ [sshtarget, shellWrap probecmd])
 		(proc "ssh" $ cacheparams ++ [sshtarget, shellWrap updatecmd])
+		=<< getprivdata
 
 	-- And now we can run it.
 	unlessM (boolSystem "ssh" (map Param $ cacheparams ++ ["-t", sshtarget, shellWrap runcmd])) $
@@ -90,6 +96,17 @@ spin target relay hst = do
 	cmd = if viarelay
 		then "--serialized " ++ shellEscape (show (Spin [target] (Just target)))
 		else "--continue " ++ shellEscape (show (SimpleRun target))
+	
+	getprivdata = case mprivdata of
+		Nothing
+			| relaying -> do
+				let f = privDataRelay hn
+				d <- readPrivDataFile f
+				nukeFile f
+				return d
+			| otherwise -> 
+				filterPrivData hst <$> decryptPrivData
+		Just pd -> pure pd
 
 -- Check if the Host contains an IP address that matches one of the IPs
 -- in the DNS for the HostName. If so, the HostName is used as-is, 
@@ -173,16 +190,16 @@ updateServer
 	-> Host
 	-> CreateProcess
 	-> CreateProcess
+	-> PrivMap
 	-> IO ()
-updateServer target relay hst connect haveprecompiled =
+updateServer target relay hst connect haveprecompiled privdata =
 	withIOHandles createProcessSuccess connect go
   where
 	hn = fromMaybe target relay
-	relaying = relay == Just target
 
 	go (toh, fromh) = do
 		let loop = go (toh, fromh)
-		let restart = updateServer hn relay hst connect haveprecompiled
+		let restart = updateServer hn relay hst connect haveprecompiled privdata
 		let done = return ()
 		v <- maybe Nothing readish <$> getMarked fromh statusMarker
 		case v of
@@ -190,7 +207,7 @@ updateServer target relay hst connect haveprecompiled =
 				sendRepoUrl toh
 				loop
 			(Just NeedPrivData) -> do
-				sendPrivData hn hst toh relaying
+				sendPrivData hn toh privdata
 				loop
 			(Just NeedGitClone) -> do
 				hClose toh
@@ -201,7 +218,7 @@ updateServer target relay hst connect haveprecompiled =
 				hClose toh
 				hClose fromh
 				sendPrecompiled hn
-				updateServer hn relay hst haveprecompiled (error "loop")
+				updateServer hn relay hst haveprecompiled (error "loop") privdata
 			(Just NeedGitPush) -> do
 				-- sendGitUpdate hn fromh toh
 				hClose fromh
@@ -212,20 +229,13 @@ updateServer target relay hst connect haveprecompiled =
 sendRepoUrl :: Handle -> IO ()
 sendRepoUrl toh = sendMarked toh repoUrlMarker =<< (fromMaybe "" <$> getRepoUrl)
 
-sendPrivData :: HostName -> Host -> Handle -> Bool -> IO ()
-sendPrivData hn hst toh relaying = do
-	privdata <- getdata
-	void $ actionMessage ("Sending privdata (" ++ show (length privdata) ++ " bytes) to " ++ hn) $ do
-		sendMarked toh privDataMarker privdata
-		return True
+sendPrivData :: HostName -> Handle -> PrivMap -> IO ()
+sendPrivData hn toh privdata = void $ actionMessage msg $ do
+	sendMarked toh privDataMarker d
+	return True
   where
-	getdata
-		| relaying = do
-			let f = privDataRelay hn
-			d <- readFileStrictAnyEncoding f
-			nukeFile f
-			return d
-		| otherwise = show . filterPrivData hst <$> decryptPrivData
+	msg = "Sending privdata (" ++ show (length d) ++ " bytes) to " ++ hn
+	d = show privdata
 
 sendGitUpdate :: HostName -> Handle -> Handle -> IO ()
 sendGitUpdate hn fromh toh =
@@ -327,8 +337,9 @@ mergeSpin = do
 	old_head <- getCurrentGitSha1 branch
 	old_commit <- findLastNonSpinCommit
 	rungit "reset" [Param old_commit]
-	rungit "commit" [Param "-a", Param "--allow-empty"]
-	rungit "merge" =<< gpgSignParams [Param "-s", Param "ours", Param old_head]
+	unlessM (gitCommit Nothing [Param "-a", Param "--allow-empty"]) $
+		error "git commit failed"
+	rungit "merge" =<< gpgSignParams [Param "-s", Param "ours", Param old_head, Param "--no-edit"]
 	current_commit <- getCurrentGitSha1 branch
 	rungit "update-ref" [Param branchref, Param current_commit]
 	rungit "checkout" [Param branch]

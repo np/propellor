@@ -93,7 +93,7 @@ disabled n = trivial $ cmdProperty "systemctl" ["disable", n]
 	`describe` ("service " ++ n ++ " disabled")
 
 -- | Masks a systemd service.
-masked :: ServiceName -> RevertableProperty
+masked :: ServiceName -> RevertableProperty NoInfo
 masked n = systemdMask <!> systemdUnmask
   where
 	systemdMask   = trivial $ cmdProperty "systemctl" ["mask", n]
@@ -174,20 +174,22 @@ machined = go `describe` "machined installed"
 					Apt.installed ["systemd-container"]
 			_ -> noChange
 
--- | Defines a container with a given machine name.
+-- | Defines a container with a given machine name, and operating system,
+-- and how to create its chroot if not already present.
 --
 -- Properties can be added to configure the Container.
 --
--- > container "webserver" (Chroot.debootstrapped (System (Debian Unstable) "amd64") mempty)
+-- > container "webserver" (System (Debian Unstable) "amd64") (Chroot.debootstrapped mempty)
 -- >    & Apt.installedRunning "apache2"
 -- >    & ...
-container :: MachineName -> (FilePath -> Chroot.Chroot) -> Container
-container name mkchroot = Container name c h
+container :: MachineName -> System -> (FilePath -> Chroot.Chroot) -> Container
+container name system mkchroot = Container name c h
 	& os system
 	& resolvConfed
 	& linkJournal
   where
-	c@(Chroot.Chroot _ system _ _) = mkchroot (containerDir name)
+	c = mkchroot (containerDir name)
+		& os system
 	h = Host name [] mempty
 
 -- | Runs a container using systemd-nspawn.
@@ -204,8 +206,8 @@ container name mkchroot = Container name c h
 --
 -- Reverting this property stops the container, removes the systemd unit,
 -- and deletes the chroot and all its contents.
-nspawned :: Container -> RevertableProperty
-nspawned c@(Container name (Chroot.Chroot loc system builderconf _) h) =
+nspawned :: Container -> RevertableProperty HasInfo
+nspawned c@(Container name (Chroot.Chroot loc builder _) h) =
 	p `describe` ("nspawned " ++ name)
   where
 	p = enterScript c
@@ -215,8 +217,8 @@ nspawned c@(Container name (Chroot.Chroot loc system builderconf _) h) =
 
 	-- Chroot provisioning is run in systemd-only mode,
 	-- which sets up the chroot and ensures systemd and dbus are
-	-- installed, but does not handle the other provisions.
-	chrootprovisioned = Chroot.provisioned' (Chroot.propigateChrootInfo chroot) chroot True
+	-- installed, but does not handle the other properties.
+	chrootprovisioned = Chroot.provisioned' (Chroot.propagateChrootInfo chroot) chroot True
 
 	-- Use nsenter to enter container and and run propellor to
 	-- finish provisioning.
@@ -225,11 +227,11 @@ nspawned c@(Container name (Chroot.Chroot loc system builderconf _) h) =
 			<!>
 		doNothing
 
-	chroot = Chroot.Chroot loc system builderconf h
+	chroot = Chroot.Chroot loc builder h
 
 -- | Sets up the service file for the container, and then starts
 -- it running.
-nspawnService :: Container -> ChrootCfg -> RevertableProperty
+nspawnService :: Container -> ChrootCfg -> RevertableProperty NoInfo
 nspawnService (Container name _ _) cfg = setup <!> teardown
   where
 	service = nspawnServiceName name
@@ -254,8 +256,9 @@ nspawnService (Container name _ _) cfg = setup <!> teardown
 		<$> servicefilecontent
 		<*> catchDefaultIO "" (readFile servicefile)
 
-	writeservicefile = property servicefile $ makeChange $
-		viaTmp writeFile servicefile =<< servicefilecontent
+	writeservicefile = property servicefile $ makeChange $ do
+		c <- servicefilecontent
+		File.viaStableTmp (\t -> writeFile t c) servicefile
 
 	setupservicefile = check (not <$> goodservicefile) $
 		-- if it's running, it has the wrong configuration,
@@ -279,7 +282,7 @@ nspawnServiceParams (SystemdNspawnCfg ps) =
 --
 -- This uses nsenter to enter the container, by looking up the pid of the
 -- container's init process and using its namespace.
-enterScript :: Container -> RevertableProperty
+enterScript :: Container -> RevertableProperty NoInfo
 enterScript c@(Container name _ _) = setup <!> teardown
   where
 	setup = combineProperties ("generated " ++ enterScriptFile c)
@@ -325,7 +328,7 @@ mungename = replace "/" "_"
 -- When there is no leading dash, "--" is prepended to the parameter.
 --
 -- Reverting the property will remove a parameter, if it's present.
-containerCfg :: String -> RevertableProperty
+containerCfg :: String -> RevertableProperty HasInfo
 containerCfg p = RevertableProperty (mk True) (mk False)
   where
 	mk b = pureInfoProperty ("container configuration " ++ (if b then "" else "without ") ++ p') $
@@ -337,18 +340,18 @@ containerCfg p = RevertableProperty (mk True) (mk False)
 -- | Bind mounts </etc/resolv.conf> from the host into the container.
 --
 -- This property is enabled by default. Revert it to disable it.
-resolvConfed :: RevertableProperty
+resolvConfed :: RevertableProperty HasInfo
 resolvConfed = containerCfg "bind=/etc/resolv.conf"
 
 -- | Link the container's journal to the host's if possible.
 -- (Only works if the host has persistent journal enabled.)
 --
 -- This property is enabled by default. Revert it to disable it.
-linkJournal :: RevertableProperty
+linkJournal :: RevertableProperty HasInfo
 linkJournal = containerCfg "link-journal=try-guest"
 
 -- | Disconnect networking of the container from the host.
-privateNetwork :: RevertableProperty
+privateNetwork :: RevertableProperty HasInfo
 privateNetwork = containerCfg "private-network"
 
 class Publishable a where
@@ -380,12 +383,13 @@ instance Publishable (Proto, Bound Port) where
 -- > 		`requires` Systemd.running Systemd.networkd
 -- >
 -- > webserver :: Systemd.container
--- > webserver = Systemd.container "webserver" (Chroot.debootstrapped (System (Debian Testing) "amd64") mempty)
+-- > webserver = Systemd.container "webserver" (Chroot.debootstrapped mempty)
+-- >	& os (System (Debian Testing) "amd64")
 -- >	& Systemd.privateNetwork
 -- >	& Systemd.running Systemd.networkd
 -- >	& Systemd.publish (Port 80 ->- Port 8080)
 -- >	& Apt.installedRunning "apache2"
-publish :: Publishable p => p -> RevertableProperty
+publish :: Publishable p => p -> RevertableProperty HasInfo
 publish p = containerCfg $ "--port=" ++ toPublish p
 
 class Bindable a where
@@ -398,9 +402,9 @@ instance Bindable (Bound FilePath) where
 	toBind v = hostSide v ++ ":" ++ containerSide v
 
 -- | Bind mount a file or directory from the host into the container.
-bind :: Bindable p => p -> RevertableProperty
+bind :: Bindable p => p -> RevertableProperty HasInfo
 bind p = containerCfg $ "--bind=" ++ toBind p
 
 -- | Read-only mind mount.
-bindRo :: Bindable p => p -> RevertableProperty
+bindRo :: Bindable p => p -> RevertableProperty HasInfo
 bindRo p = containerCfg $ "--bind-ro=" ++ toBind p

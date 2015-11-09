@@ -5,12 +5,14 @@ import Propellor.Types.PrivData
 
 import System.Posix.Types
 
+-- | All the command line actions that propellor can perform.
 data CmdLine
 	= Run HostName
 	| Spin [HostName] (Maybe HostName)
 	| SimpleRun HostName
 	| Set PrivDataField Context
 	| Unset PrivDataField Context
+	| UnsetUnused
 	| Dump PrivDataField Context
 	| Edit PrivDataField Context
 	| ListFields
@@ -27,4 +29,3 @@ data CmdLine
 	| GitPush Fd Fd
 	| Check
 	deriving (Read, Show, Eq)
-

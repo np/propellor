@@ -15,6 +15,7 @@ import qualified Propellor.Property.User as User
 import qualified Propellor.Property.Obnam as Obnam
 import qualified Propellor.Property.Apache as Apache
 import qualified Propellor.Property.Postfix as Postfix
+import qualified Propellor.Property.Systemd as Systemd
 import Utility.FileMode
 
 import Data.List
@@ -137,7 +138,10 @@ oldUseNetServer hosts = propertyList "olduse.net server" $ props
 		, "--client-name=spool"
 		, "--ssh-key=" ++ keyfile
 		] Obnam.OnlyClient
-		`requires` Ssh.keyImported' (Just keyfile) SshRsa (User "root") (Context "olduse.net")
+		`requires` Ssh.userKeyAt (Just keyfile)
+			(User "root")
+			(Context "olduse.net")
+			(SshRsa, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD0F6L76SChMCIGmeyGhlFMUTgZ3BoTbATiOSs0A7KXQoI1LTE5ZtDzzUkrQRJVpJ640pfMR7cQZyBm8tv+kYIPp0238GrX43c1vgm0L78agDnBU7r2iNMyWIwhssK8O3ZAhp8Q4KCz1r8hP2nIiD0y1D1VWW8h4KWOS7I1XCEAjOTvFvEjTh6a9MyHrcIkv7teUUzTBRjNrsyijCFRk1+pEET54RueoOmEjQcWd/sK1tYRiMZjegRLBOus2wUWsUOvznJ2iniLONUTGAWRnEV+O7hLN6CD44osJ+wkZk8bPAumTS0zcSLckX1jpdHJicmAyeniWSd4FCqm1YE6/xDD")
 		`requires` Ssh.knownHost hosts "usw-s002.rsync.net" (User "root")
 	keyfile = "/root/.ssh/olduse.net.key"
 
@@ -183,13 +187,18 @@ mumbleServer hosts = combineProperties hn $ props
 	& Apt.serviceInstalledRunning "mumble-server"
 	& Obnam.backup "/var/lib/mumble-server" (Cron.Times "55 5 * * *")
 		[ "--repository=sftp://2318@usw-s002.rsync.net/~/" ++ hn ++ ".obnam"
+		, "--ssh-key=" ++ sshkey
 		, "--client-name=mumble"
 		] Obnam.OnlyClient
-		`requires` Ssh.keyImported SshRsa (User "root") (Context hn)
+		`requires` Ssh.userKeyAt (Just sshkey)
+			(User "root")
+ 			(Context hn)
+			(SshRsa, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDSXXSM3mM8SNu+qel9R/LkDIkjpV3bfpUtRtYv2PTNqicHP+DdoThrr0ColFCtLH+k2vQJvR2n8uMzHn53Dq2IO3TtD27+7rJSsJwAZ8oftNzuTir8IjAwX5g6JYJs+L0Ny4RB0ausd+An0k/CPMRl79zKxpZd2MBMDNXt8hyqu0vS0v1ohq5VBEVhBBvRvmNQvWOCj7PdrKQXpUBHruZOeVVEdUUXZkVc1H0t7LVfJnE+nGKyWbw2jM+7r3Rn5Semc4R1DxsfaF8lKkZyE88/5uZQ/ddomv8ptz6YZ5b+Bg6wfooWPC3RWAALjxnHaC2yN1VONAvHmT0uNn1o6v0b")
 		`requires` Ssh.knownHost hosts "usw-s002.rsync.net" (User "root")
 	& trivial (cmdProperty "chown" ["-R", "mumble-server:mumble-server", "/var/lib/mumble-server"])
   where
 	hn = "mumble.debian.net"
+	sshkey = "/root/.ssh/mumble.debian.net.key"
 
 -- git.kitenet.net and git.joeyh.name
 gitServer :: [Host] -> Property HasInfo
@@ -199,7 +208,10 @@ gitServer hosts = propertyList "git.kitenet.net setup" $ props
 		, "--ssh-key=" ++ sshkey
 		, "--client-name=wren" -- historical
 		] Obnam.OnlyClient (Gpg.GpgKeyId "1B169BE1")
-		`requires` Ssh.keyImported' (Just sshkey) SshRsa (User "root") (Context "git.kitenet.net")
+		`requires` Ssh.userKeyAt (Just sshkey)
+			(User "root")
+			(Context "git.kitenet.net")
+			(SshRsa, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQD0F6L76SChMCIGmeyGhlFMUTgZ3BoTbATiOSs0A7KXQoI1LTE5ZtDzzUkrQRJVpJ640pfMR7cQZyBm8tv+kYIPp0238GrX43c1vgm0L78agDnBU7r2iNMyWIwhssK8O3ZAhp8Q4KCz1r8hP2nIiD0y1D1VWW8h4KWOS7I1XCEAjOTvFvEjTh6a9MyHrcIkv7teUUzTBRjNrsyijCFRk1+pEET54RueoOmEjQcWd/sK1tYRiMZjegRLBOus2wUWsUOvznJ2iniLONUTGAWRnEV+O7hLN6CD44osJ+wkZk8bPAumTS0zcSLckX1jpdHJicmAyeniWSd4FCqm1YE6/xDD")
 		`requires` Ssh.knownHost hosts "usw-s002.rsync.net" (User "root")
 		`requires` Ssh.authorizedKeys (User "family") (Context "git.kitenet.net")
 		`requires` User.accountFor (User "family")
@@ -286,7 +298,7 @@ annexWebSite origin hn uuid remotes = propertyList (hn ++" website using git-ann
 		, "  </Directory>"
 		]
 
-apacheSite :: HostName -> Bool -> Apache.ConfigFile -> RevertableProperty
+apacheSite :: HostName -> Bool -> Apache.ConfigFile -> RevertableProperty NoInfo
 apacheSite hn withssl middle = Apache.siteEnabled hn $ apachecfg hn withssl middle
 
 apachecfg :: HostName -> Bool -> Apache.ConfigFile -> Apache.ConfigFile
@@ -335,6 +347,7 @@ gitAnnexDistributor = combineProperties "git-annex distributor, including rsync 
 		`onChange` Service.restarted "rsync"
 	& "/etc/default/rsync" `File.containsLine` "RSYNC_ENABLE=true"
 		`onChange` Service.running "rsync"
+	& Systemd.enabled "rsync"
 	& endpoint "/srv/web/downloads.kitenet.net/git-annex/autobuild"
 	& endpoint "/srv/web/downloads.kitenet.net/git-annex/autobuild/x86_64-apple-yosemite"
 	& endpoint "/srv/web/downloads.kitenet.net/git-annex/autobuild/windows"
@@ -725,7 +738,7 @@ dkimInstalled = go `onChange` Service.restarted "opendkim"
 -- This value can be included in a domain's additional records to make
 -- it use this domainkey.
 domainKey :: (BindDomain, Record)
-domainKey = (RelDomain "mail._domainkey", TXT "v=DKIM1; k=rsa; t=y; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCc+/rfzNdt5DseBBmfB3C6sVM7FgVvf4h1FeCfyfwPpVcmPdW6M2I+NtJsbRkNbEICxiP6QY2UM0uoo9TmPqLgiCCG2vtuiG6XMsS0Y/gGwqKM7ntg/7vT1Go9vcquOFFuLa5PnzpVf8hB9+PMFdS4NPTvWL2c5xxshl/RJzICnQIDAQAB")
+domainKey = (RelDomain "mail._domainkey", TXT "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCc+/rfzNdt5DseBBmfB3C6sVM7FgVvf4h1FeCfyfwPpVcmPdW6M2I+NtJsbRkNbEICxiP6QY2UM0uoo9TmPqLgiCCG2vtuiG6XMsS0Y/gGwqKM7ntg/7vT1Go9vcquOFFuLa5PnzpVf8hB9+PMFdS4NPTvWL2c5xxshl/RJzICnQIDAQAB")
 
 hasJoeyCAChain :: Property HasInfo
 hasJoeyCAChain = "/etc/ssl/certs/joeyca.pem" `File.hasPrivContentExposed`
@@ -908,10 +921,10 @@ legacyWebSites = propertyList "legacy web sites" $ props
 		, "rewriterule (.*) http://joeyh.name$1 [r]"
 		]
 
-userDirHtml :: Property HasInfo
+userDirHtml :: Property NoInfo
 userDirHtml = File.fileProperty "apache userdir is html" (map munge) conf
 	`onChange` Apache.reloaded
-	`requires` (toProp $ Apache.modEnabled "userdir")
+	`requires` Apache.modEnabled "userdir"
   where
 	munge = replace "public_html" "html"
 	conf = "/etc/apache2/mods-available/userdir.conf"

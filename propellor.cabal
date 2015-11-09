@@ -1,5 +1,5 @@
 Name: propellor
-Version: 2.9.0
+Version: 2.13.0
 Cabal-Version: >= 1.8
 License: BSD3
 Maintainer: Joey Hess <id@joeyh.name>
@@ -34,35 +34,35 @@ Description:
 
 Executable propellor
   Main-Is: wrapper.hs
-  GHC-Options: -threaded -O0 -Wall -fno-warn-tabs
+  GHC-Options: -threaded -Wall -fno-warn-tabs
   Hs-Source-Dirs:  src
   Build-Depends: MissingH, directory, filepath, base >= 4.5, base < 5,
    IfElse, process, bytestring, hslogger, unix-compat, ansi-terminal,
    containers (>= 0.5), network, async, time, QuickCheck, mtl, transformers,
-   exceptions (>= 0.6)
+   exceptions (>= 0.6), stm, text
 
   if (! os(windows))
     Build-Depends: unix
 
 Executable propellor-config
   Main-Is: config.hs
-  GHC-Options: -threaded -O0 -Wall -fno-warn-tabs
+  GHC-Options: -threaded -Wall -fno-warn-tabs
   Hs-Source-Dirs:  src
   Build-Depends: MissingH, directory, filepath, base >= 4.5, base < 5,
    IfElse, process, bytestring, hslogger, unix-compat, ansi-terminal,
    containers (>= 0.5), network, async, time, QuickCheck, mtl, transformers,
-   exceptions
+   exceptions, stm, text
 
   if (! os(windows))
     Build-Depends: unix
 
 Library
-  GHC-Options: -O0 -Wall -fno-warn-tabs
+  GHC-Options: -Wall -fno-warn-tabs
   Hs-Source-Dirs:  src
   Build-Depends: MissingH, directory, filepath, base >= 4.5, base < 5,
    IfElse, process, bytestring, hslogger, unix-compat, ansi-terminal,
    containers (>= 0.5), network, async, time, QuickCheck, mtl, transformers,
-   exceptions
+   exceptions, stm, text
 
   if (! os(windows))
     Build-Depends: unix
@@ -76,6 +76,8 @@ Library
     Propellor.Property.Apache
     Propellor.Property.Apt
     Propellor.Property.Cmd
+    Propellor.Property.Concurrent
+    Propellor.Property.Conductor
     Propellor.Property.Hostname
     Propellor.Property.Chroot
     Propellor.Property.ConfFile
@@ -83,6 +85,7 @@ Library
     Propellor.Property.DebianMirror
     Propellor.Property.Debootstrap
     Propellor.Property.DiskImage
+    Propellor.Property.DiskImage.PartSpec
     Propellor.Property.Dns
     Propellor.Property.DnsSec
     Propellor.Property.Docker
@@ -94,6 +97,9 @@ Library
     Propellor.Property.Grub
     Propellor.Property.Journald
     Propellor.Property.Kerberos
+    Propellor.Property.List
+    Propellor.Property.LightDM
+    Propellor.Property.Logcheck
     Propellor.Property.Mount
     Propellor.Property.Network
     Propellor.Property.Nginx
@@ -106,9 +112,6 @@ Library
     Propellor.Property.Prosody
     Propellor.Property.Reboot
     Propellor.Property.Rsync
-    Propellor.Property.List
-    Propellor.Property.LightDM
-    Propellor.Property.Logcheck
     Propellor.Property.Scheduled
     Propellor.Property.Service
     Propellor.Property.Ssh
@@ -132,6 +135,7 @@ Library
     Propellor.CmdLine
     Propellor.Info
     Propellor.Message
+    Propellor.Debug
     Propellor.PrivData
     Propellor.Engine
     Propellor.Exception
@@ -172,6 +176,7 @@ Library
     Utility.PartialPrelude
     Utility.PosixFiles
     Utility.Process
+    Utility.Process.Shim
     Utility.SafeCommand
     Utility.Scheduled
     Utility.Table
@@ -179,6 +184,9 @@ Library
     Utility.Tmp
     Utility.UserInfo
     Utility.QuickCheck
+    System.Console.Concurrent
+    System.Console.Concurrent.Internal
+    System.Process.Concurrent
 
 source-repository head
   type: git
